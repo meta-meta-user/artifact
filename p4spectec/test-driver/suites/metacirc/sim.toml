@@ -1,0 +1,29 @@
+# Simulation through a metacircular P4 tower: `sim <config>`
+# (make test-mm-sim-st, test-mm-sim-k, test-mm-sim-redex).
+#
+# Runs the suites of `suites/sim.toml`, with their corpus pairing, exclusions,
+# and expected files, on simulators built from the configuration's tower.
+# A configuration selects the `base` language of the tower (see `run.toml`),
+# memoization (`cache`), and determinism checking (`det`).
+# `towers` names the P4 tower per base.
+# Paths are relative to the repository root.
+
+towers = { al = "towers/al-p4.json", k = "towers/k-p4.json", redex = "towers/redex-p4.json" }
+
+[[configs]]
+name = "al"
+base = "al"
+cache = true
+det = true
+
+[[configs]]
+name = "k"
+base = "k"
+cache = true
+det = true
+
+[[configs]]
+name = "redex"
+base = "redex"
+cache = true
+det = true

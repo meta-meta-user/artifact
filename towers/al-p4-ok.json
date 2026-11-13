@@ -1,0 +1,7 @@
+{
+  "mode": "sl",
+  "levels": [
+    { "specdir": "../spec-meta", "rel": "Eval_rel", "lang": "al" },
+    { "specdir": "../spec", "rel": "Program_ok", "lang": "p4" }
+  ]
+}

@@ -1,0 +1,27 @@
+;;
+;; Fresh identifiers
+;;
+;; syntax id
+;;
+
+;; A name based on `x` that is not in use: `x`, then `x'`, `x''`, ...
+
+dec $fresh(id*, id) : id
+  hint(prose_in "a fresh name based on" %1 "avoiding" %0)
+def $fresh(id_used*, id) = id
+  -- if ~(id <- id_used*)
+def $fresh(id_used*, id) = $fresh(id_used*, id ++ "'")
+  -- if id <- id_used*
+
+;;
+;; Dimensions
+;;
+;; syntax vari
+;;
+
+;; Iterating `x` by `[ *, ? ]` gives `x*?`
+
+dec $iterate_vari(vari, iter*) : vari
+  hint(prose_in %0 "iterated by" %1)
+
+def $iterate_vari(id typ iter*, iter_add*) = id typ (iter* ++ iter_add*)

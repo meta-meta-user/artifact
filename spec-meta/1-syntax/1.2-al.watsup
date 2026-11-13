@@ -1,0 +1,71 @@
+;; Iteration premises
+
+syntax premIter = iter '<-' vari* '->' vari*
+
+;; Premises
+
+syntax prem
+
+syntax relPrem =
+  REL id ':' typedExp* '->' typedExp*
+
+syntax letPrem =
+  LET typedExp '=' typedExp
+
+syntax iterPrem =
+  ITER prem premIter
+
+syntax prem =
+  | relPrem
+  | ifPrem
+  | ifHoldPrem
+  | ifNotHoldPrem
+  | letPrem
+  | iterPrem
+  | debugPrem
+
+;; Relation definitions
+
+syntax externRelDefn =
+  EXTREL id ':' typ* '->' typ*
+
+syntax rul = id ':' typedExp* '->' typedExp* '-' prem*
+syntax rulGroup = id ':' rul*
+syntax elsGroup = id ':' rul
+
+syntax definedRelDefn =
+  REL id ':' typ* '->' typ* '=' rulGroup* elsGroup?
+
+syntax relDefn =
+  | externRelDefn
+  | definedRelDefn
+
+;; Meta-functions
+
+syntax tblRow = arg* '=' typedExp '-' prem*
+
+syntax tableFuncDefn =
+  TABLEFUNC id param* ':' typ '=' tblRow*
+
+syntax clause = arg* '=' typedExp '-' prem*
+syntax elsClause = clause
+
+syntax definedFuncDefn =
+  FUNC id tparam* param* ':' typ '=' clause* elsClause?
+
+syntax funcDefn =
+  | externFuncDefn
+  | builtinFuncDefn
+  | tableFuncDefn
+  | definedFuncDefn
+
+;; Definitions
+
+syntax defn =
+  | typDefn
+  | relDefn
+  | funcDefn
+
+;; Specifications
+
+syntax spec = defn*

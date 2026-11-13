@@ -1,0 +1,13 @@
+//! Suites of the metacircular driver, one per registration in `suites/metacirc/`
+//!
+//! `run` and `sim` execute corpus and simulation suites through towers
+//! under a `config::Configuration`,
+//! comparing with the main driver's expectations;
+//! `run_group` runs groups of P4 corpus programs, comparing with each group's expectations;
+//! and `sim_group` runs groups of simulation tests, comparing with each group's expectations.
+
+pub mod config;
+pub mod run;
+pub mod run_group;
+pub mod sim;
+pub mod sim_group;

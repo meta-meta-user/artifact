@@ -1,0 +1,25 @@
+;; Entry point for specifications in AL
+
+;; Each entry calls either a relation or a function, never trying both
+
+relation Eval_rel:
+  spec |- id `( val* `) : val*
+  hint(input %0 %1 %2)
+  hint(prose_in "calling relation" %1 "with inputs" %2 "in specification" %0)
+  hint(prose_out "values" %3)
+
+relation Eval_func:
+  spec |- id `( val* `) : val
+  hint(input %0 %1 %2)
+  hint(prose_in "calling function" %1 "with inputs" %2 "in specification" %0)
+  hint(prose_out "value" %3)
+
+rule Eval_rel:
+  spec |- id `( val* `) : val'*
+  -- if C = $load_ctx($empty_ctx, spec)
+  -- Call_rel: C |- id `( val* `) : OK val'*
+
+rule Eval_func:
+  spec |- id `( val* `) : val'
+  -- if C = $load_ctx($empty_ctx, spec)
+  -- Call_func: C |- id `< eps `> `( val* `) : OK val'

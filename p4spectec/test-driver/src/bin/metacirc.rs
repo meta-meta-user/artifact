@@ -1,0 +1,191 @@
+//! Execution entry point for the AL metacircular specification
+
+use std::{path::PathBuf, process::ExitCode, time::Duration};
+
+use clap::{Parser, Subcommand};
+
+use p4spectec_test::{
+    harness::{self, Result},
+    metacirc::{run, run_group, sim, sim_group},
+};
+
+/// Selects an execution through towers.
+#[derive(Clone, Subcommand)]
+enum Command {
+    /// Compare registered P4 corpus and script outcomes through towers
+    Run {
+        /// Configuration name in `suites/metacirc/run.toml`
+        config: String,
+        /// Run only the registered suite with this name.
+        #[arg(long = "suite", value_name = "NAME")]
+        name_suite: Option<String>,
+        /// Run only the suites whose tower takes this input.
+        #[arg(long, value_enum)]
+        input: Option<run::Input>,
+        /// Record a source still running after this many seconds as a timeout.
+        #[arg(long, value_name = "SECONDS")]
+        timeout: Option<u64>,
+    },
+    /// Compare one group of a P4 corpus suite through a tower with the group's expectations
+    RunGroup {
+        /// Configuration name in `suites/metacirc/run-group.toml`
+        config: String,
+        /// Name of the registered suite to run.
+        #[arg(long = "suite", value_name = "NAME")]
+        name_suite: String,
+        /// Name of the registered group to run.
+        #[arg(long, value_name = "NAME")]
+        group: String,
+        /// Record a program still running after this many seconds as a timeout.
+        #[arg(long, value_name = "SECONDS")]
+        timeout: Option<u64>,
+    },
+    /// Write the group folders of `suites/metacirc/run-group.toml`
+    RunGroupSplit {
+        /// Number of programs in each group folder, in folder order
+        #[arg(required = true, value_name = "SIZE")]
+        sizes: Vec<usize>,
+    },
+    /// Compare registered simulation suites through a tower with native expectations
+    Sim {
+        /// Configuration name in `suites/metacirc/sim.toml`
+        config: String,
+        /// Run only the registered simulation suite with this name.
+        #[arg(long = "suite", value_name = "NAME")]
+        name_suite: Option<String>,
+        /// Record a test still running after this many seconds as a timeout.
+        #[arg(long, value_name = "SECONDS")]
+        timeout: Option<u64>,
+    },
+    /// Compare one group of a simulation suite through a tower with the group's expectations
+    SimGroup {
+        /// Configuration name in `suites/metacirc/sim-group.toml`
+        config: String,
+        /// Name of the registered suite to run.
+        #[arg(long = "suite", value_name = "NAME")]
+        name_suite: String,
+        /// Name of the registered group to run.
+        #[arg(long, value_name = "NAME")]
+        group: String,
+        /// Record a test still running after this many seconds as a timeout.
+        #[arg(long, value_name = "SECONDS")]
+        timeout: Option<u64>,
+    },
+    /// Write the group folders of `suites/metacirc/sim-group.toml`
+    SimGroupSplit,
+    /// List every metacirc registration
+    List,
+    /// Run sources one at a time for a driver given `--timeout`
+    #[command(hide = true, subcommand)]
+    Worker(Worker),
+}
+
+/// Prepares a configuration once and answers requests on stdin.
+#[derive(Clone, Subcommand)]
+enum Worker {
+    /// Run P4 programs of `suites/metacirc/run.toml` through a tower
+    Program { config: String, tower: PathBuf },
+    /// Run scripts of `suites/metacirc/run.toml` through a tower
+    Script { config: String, tower: PathBuf },
+    /// Run P4 programs of `suites/metacirc/run-group.toml` through a tower
+    RunGroup { config: String, tower: PathBuf },
+    /// Run STF tests of `suites/metacirc/sim.toml` on one architecture
+    Sim { config: String, arch: String },
+    /// Run STF tests of `suites/metacirc/sim-group.toml` on one architecture
+    SimGroup { config: String, arch: String },
+}
+
+/// Compares P4 corpus and AL script outcomes through metacircular towers.
+#[derive(Parser)]
+struct Cli {
+    /// Write a per-test timing log of run or sim into a new file in this directory
+    #[arg(long = "log", global = true, value_name = "DIR")]
+    path_log: Option<PathBuf>,
+    #[command(subcommand)]
+    command: Command,
+}
+
+/// Runs the selected command from the repository root.
+fn execute(cli: Cli) -> Result<()> {
+    // Resolve the log directory before changing to the specification repository
+    let path_log = cli
+        .path_log
+        .as_deref()
+        .map(std::path::absolute)
+        .transpose()?;
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()?;
+    std::env::set_current_dir(&root)?;
+    match cli.command {
+        Command::Run { config, name_suite, input, timeout } => run::run(
+            &config,
+            name_suite.as_deref(),
+            input,
+            timeout.map(Duration::from_secs),
+            path_log.as_deref(),
+        ),
+        Command::RunGroup { config, name_suite, group, timeout } => run_group::run(
+            &config,
+            &name_suite,
+            &group,
+            timeout.map(Duration::from_secs),
+            path_log.as_deref(),
+        ),
+        Command::RunGroupSplit { sizes } => run_group::split(&sizes),
+        Command::Sim { config, name_suite, timeout } => sim::run(
+            &config,
+            name_suite.as_deref(),
+            timeout.map(Duration::from_secs),
+            path_log.as_deref(),
+        ),
+        Command::SimGroup { config, name_suite, group, timeout } => sim_group::run(
+            &config,
+            &name_suite,
+            &group,
+            timeout.map(Duration::from_secs),
+            path_log.as_deref(),
+        ),
+        Command::SimGroupSplit => sim_group::split(),
+        Command::List => list(),
+        Command::Worker(Worker::Program { config, tower }) => run::serve_programs(&config, &tower),
+        Command::Worker(Worker::Script { config, tower }) => run::serve_scripts(&config, &tower),
+        Command::Worker(Worker::RunGroup { config, tower }) => run_group::serve(&config, &tower),
+        Command::Worker(Worker::Sim { config, arch }) => sim::serve(&config, &arch),
+        Command::Worker(Worker::SimGroup { config, arch }) => sim_group::serve(&config, &arch),
+    }
+}
+
+/// Prints every metacirc registration without running its tests.
+fn list() -> Result<()> {
+    println!("run: {:#?}", harness::load::<run::Registration>("metacirc/run")?);
+    println!("run-group: {:#?}", harness::load::<run_group::Registration>("metacirc/run-group")?);
+    println!("sim: {:#?}", harness::load::<sim::Registration>("metacirc/sim")?);
+    println!("sim-group: {:#?}", harness::load::<sim_group::Registration>("metacirc/sim-group")?);
+    Ok(())
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    let result = std::thread::Builder::new()
+        .name("metacirc-driver".to_owned())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || execute(cli).map_err(|error| error.to_string()));
+    match result {
+        Ok(thread) => match thread.join() {
+            Ok(Ok(())) => ExitCode::SUCCESS,
+            Ok(Err(error)) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+            Err(_) => {
+                eprintln!("test driver panicked; expected validation failed");
+                ExitCode::FAILURE
+            }
+        },
+        Err(error) => {
+            eprintln!("cannot start test driver: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}

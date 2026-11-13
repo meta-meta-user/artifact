@@ -1,0 +1,205 @@
+//! Construction of a tower's levels and the storage above its base
+//!
+//! ```text
+//!   +-----------------+-----------------+
+//!   | Builtin P4      | Extern P4       |   top     Top::P4, Ext
+//!   +-----------------+-----------------+
+//!                     ^ protocols[1]
+//!   +-----------------+-----------------+
+//!   | Builtin SpecTec | Extern SpecTec  |   interm  hosts[0], Boundary
+//!   +-----------------+-----------------+
+//!                     ^ protocols[0]
+//!   +-----------------+-----------------+
+//!   | Builtin SpecTec | Extern SpecTec  |   base    Base::St, Upper
+//!   +-----------------+-----------------+
+//!   |      Interp(base AL): entry       |
+//!   +-----------------------------------+
+//! ```
+//!
+//! Only the base runs natively, as a runner with an interpreter.
+//! A level above it is interpreted by the level below,
+//! so `Upper` stores it per level, answering relayed builtin and host calls.
+//! An AL top ends the tower at its program, `Top::St`,
+//! which answers only the program's builtins
+//! across one more boundary above the highest meta level.
+//!
+//! | level below accepts | `PreparedLevel` | encoded for the level below  |
+//! |---------------------|-----------------|------------------------------|
+//! | none (base)         | `Base`          | —                            |
+//! | `al`                | `Al`            | spec-meta's AL               |
+
+use super::super::engine::{InterfaceSt, RuntimeK, RuntimeRedex, StateK, StateRedex};
+use super::super::protocol::{Protocol, ProtocolKind, ProtocolStK, ProtocolStRedex, ProtocolStSt};
+use super::super::{BaseConfig, Repr, Result, TowerConfig, config::Lang, error::config_invalid};
+use super::{Base, BaseK, BaseRedex, PreparedLevel, Top, Tower, Upper};
+use crate::{
+    interface::{
+        self,
+        p4::{P4Interface, unparse::P4Unparser},
+    },
+    lang::{al::ast as al, data::arena::Arena},
+    pass::structure,
+    runner::{self, Extern, Host, Runner, Spec},
+};
+
+// == Helpers
+
+/// Converts the AL of a specification into the representation selected for the runner.
+fn into_runner_spec(repr: Repr, spec_al: al::Spec) -> Result<Spec> {
+    match repr {
+        Repr::Al => Ok(Spec::Al(spec_al)),
+        Repr::Sl => structure::convert(spec_al, true).map(Spec::Sl),
+    }
+}
+
+/// Prepares the P4 interface, with print hints from the form the top level is prepared in.
+///
+/// `spec_base_al` is read only when the top level is the base, a P4 specification.
+fn interface_p4(level_top: &PreparedLevel, spec_base_al: Option<&al::Spec>) -> P4Interface {
+    let unparser = match level_top {
+        PreparedLevel::Base { .. } => {
+            P4Unparser::from_al_spec(spec_base_al.expect("a P4 base is read as AL"))
+        }
+        PreparedLevel::Al { spec_al, .. } => P4Unparser::from_al_spec(spec_al),
+    };
+    interface::p4_with_unparser(unparser)
+}
+
+// == Level construction
+
+/// Prepares the levels above a meta base, up to the P4 top or the program,
+/// and the protocol of each boundary below them.
+///
+/// Only a P4 top level uses `external_p4`.
+fn build_upper<Ext: Extern>(
+    config: &TowerConfig,
+    level_top: &PreparedLevel,
+    spec_base_al: Option<&al::Spec>,
+    options: runner::Config,
+    external_p4: Ext,
+) -> Upper<Ext> {
+    let (top, configs_host) = match config.top_lang() {
+        // Above a meta top level is its program; every level above the base is meta
+        Lang::Al => {
+            let top = Top::St(interface::meta());
+            (top, &config.levels[1..])
+        }
+        // A P4 top level is the highest level, above the meta levels below it
+        Lang::P4 => {
+            let host = Host::new(interface_p4(level_top, spec_base_al), external_p4);
+            (Top::P4(host), &config.levels[1..config.levels.len() - 1])
+        }
+    };
+    // Each meta level between the base and the top answers its builtins
+    let hosts = configs_host
+        .iter()
+        .map(|_| interface::meta())
+        .collect::<Vec<_>>();
+    // The level below each boundary interprets the level above it:
+    // a K base runs spec-meta-k, a Redex base runs spec-meta-redex,
+    // and every other level is spec-meta
+    // Each level through the top has C and the protocol of the boundary below it,
+    // which keeps that boundary's codec state
+    let count = hosts.len() + 1;
+    let cache = options.cache;
+    let protocols = (0..count)
+        .map(|idx_below| match (idx_below, &config.base) {
+            (0, BaseConfig::K { .. }) => ProtocolKind::StK(ProtocolStK::new(cache)),
+            (0, BaseConfig::Redex { .. }) => ProtocolKind::StRedex(ProtocolStRedex::new(cache)),
+            _ => ProtocolKind::StSt(Box::new(ProtocolStSt::new(cache))),
+        })
+        .collect();
+    Upper { protocols, ctxs: vec![None; count], hosts, top, depth_next: None }
+}
+
+// == Tower assembly
+
+impl<Ext: Extern> Tower<Ext> {
+    /// Prepares a tower without parsing or encoding its input.
+    ///
+    /// Only the base is converted for a native runner;
+    /// every other level is prepared in the form the level below accepts.
+    /// All calls must use the construction arena.
+    /// A P4 top level uses `external_p4` as its extern.
+    pub fn build(
+        arena: &mut Arena,
+        config: &TowerConfig,
+        options: runner::Config,
+        external_p4: Ext,
+    ) -> Result<Self> {
+        // Prepare each specification once, from base to top, into its PreparedLevel;
+        // the base is also converted for its native runner
+        let levels = config
+            .levels
+            .iter()
+            .enumerate()
+            .map(|(idx, config_level)| {
+                let paths = std::slice::from_ref(&config_level.specdir);
+                let lang_below = idx
+                    .checked_sub(1)
+                    .map(|idx_below| config.levels[idx_below].lang);
+                Ok(match lang_below {
+                    None => PreparedLevel::Base { config: config_level.clone() },
+                    Some(Lang::Al) => PreparedLevel::Al {
+                        config: config_level.clone(),
+                        spec_al: crate::algo(paths)?,
+                    },
+                    Some(_) => {
+                        return Err(config_invalid(format!(
+                            "invalid language at level {}: expected al",
+                            idx - 1
+                        )));
+                    }
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Only the base runs natively
+        let level_top = levels.last().expect("validated nonempty tower");
+        let config_base = &config.levels[0];
+        let base = match &config.base {
+            // A K base runs from its compiled library and hosts the levels above it
+            BaseConfig::K { kompiled } => {
+                let runtime = RuntimeK::load(kompiled)?;
+                let state = StateK::new(&runtime)?;
+                let upper = build_upper(config, level_top, None, options, external_p4);
+                Base::K(BaseK { runtime, state, upper, effects: 0 })
+            }
+            // A Redex base runs in a racket process and hosts the levels above it
+            BaseConfig::Redex { module } => {
+                let runtime = RuntimeRedex::load(module)?;
+                let state = StateRedex::new(&runtime)?;
+                let upper = build_upper(config, level_top, None, options, external_p4);
+                Base::Redex(BaseRedex { runtime, state, upper, effects: 0 })
+            }
+            BaseConfig::St { repr } => {
+                let spec_base_al = crate::algo(std::slice::from_ref(&config_base.specdir))?;
+                match config_base.lang {
+                    // A P4 base is the whole tower
+                    Lang::P4 => {
+                        let interface = interface_p4(level_top, Some(&spec_base_al));
+                        let spec_base = into_runner_spec(*repr, spec_base_al)?;
+                        let runner =
+                            Runner::new(arena, spec_base, options, interface, external_p4)?;
+                        Base::P4(runner)
+                    }
+                    // A meta base hosts the levels above it as its extern
+                    Lang::Al => {
+                        let interface = InterfaceSt::StSt(interface::meta());
+                        let upper = build_upper(
+                            config,
+                            level_top,
+                            Some(&spec_base_al),
+                            options,
+                            external_p4,
+                        );
+                        let spec_base = into_runner_spec(*repr, spec_base_al)?;
+                        let runner = Runner::new(arena, spec_base, options, interface, upper)?;
+                        Base::St(runner)
+                    }
+                }
+            }
+        };
+        Ok(Self { levels, base, options, entry: config.entry.clone(), observers: Vec::new() })
+    }
+}

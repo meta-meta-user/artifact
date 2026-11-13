@@ -1,0 +1,16 @@
+;; Runtime variables
+
+syntax varr = id iter*
+
+;; Value environment
+
+syntax venv = map<varr, val>
+
+;; Relation environment
+
+syntax renv = map<id, relDefn>
+
+;; Function environment
+
+syntax fenv = map<id, funcDefn>
+syntax fnenv = map<id, id>
