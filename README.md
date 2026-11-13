@@ -160,12 +160,12 @@ For option 3, the same structure is at the repository root instead of `/meta/`.
 
 The prototype scenario of meta-meta-guided evolution in the paper is in two pull requests of this repository.
 
-- PR #1 is the intermediate step of the evolution, with one commit for each change:
-  - $\text{v0}^{\text{v0}}$-to-$\text{v1}^{\text{v0}}$, on the P4-SpecTec specification in `spec-meta/`.
-  - $\text{P4}^{\text{v0}}$-to-$\text{P4}^{\text{v1}}$, on the P4 specification in `spec/`.
-- PR #2 completes the evolution, with one commit for each change:
-  - $\text{v0}^{\text{Rust}}$-to-$\text{v1}^{\text{Rust}}$, on the Rust implementation in `p4spectec/`.
-  - $\text{v1}^{\text{v0}}$-to-$\text{v1}^{\text{v1}}$, on the P4-SpecTec specification in `spec-meta/`.
+- [PR #1](https://github.com/meta-meta-user/artifact/pull/1) is the intermediate step of the evolution, with one commit for each change:
+  - $\text{v0}^{\text{v0}}$ to $\text{v1}^{\text{v0}}$, on the P4-SpecTec specification in `spec-meta/`.
+  - $\text{P4}^{\text{v0}}$ to $\text{P4}^{\text{v1}}$, on the P4 specification in `spec/`.
+- [PR #2](https://github.com/meta-meta-user/artifact/pull/2) completes the evolution, with one commit for each change:
+  - $\text{v0}^{\text{Rust}}$ to $\text{v1}^{\text{Rust}}$, on the Rust implementation in `p4spectec/`.
+  - $\text{v1}^{\text{v0}}$ to $\text{v1}^{\text{v1}}$, on the P4-SpecTec specification in `spec-meta/`.
 
 ## 4. Evaluation
 
